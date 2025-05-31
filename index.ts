@@ -10,7 +10,7 @@ type ExtractValues<R extends RulesAccumulator> = {
 type Listener<T> = (value: T) => void;
 
 // ===== Engine Core =====
-function createReactiveRulesEngine<R extends RulesAccumulator>(rules: R) {
+export function createReactiveRulesEngine<R extends RulesAccumulator>(rules: R) {
   const values: Partial<ExtractValues<R>> = {};
   const dependents: Record<keyof R, Set<keyof R>> = {} as any;
   const watchers: Partial<Record<keyof R, () => void>> = {};
@@ -109,17 +109,3 @@ class RuleEngineBuilder<R extends RulesAccumulator> {
     return createReactiveRulesEngine(this.rules);
   }
 }
-
-const engine = new RuleEngineBuilder({})
-  .addRule("a", () => 2)
-  .addRule("b", () => 3)
-  .addRule("sum", ({ a, b }) => a + b) // ✅ OK
-  .addRule("doubleSum", ({ sum }) => sum * 2) // ✅ OK
-  .build();
-
-// Reactive change
-engine.onChange("doubleSum", (v) => console.log("doubleSum changed to", v));
-
-console.log(engine.snapshot()); // { a: 2, b: 3, sum: 5, doubleSum: 10 }
-
-engine.set("a", 10); // doubleSum changed to 26
