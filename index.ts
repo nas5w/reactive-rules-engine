@@ -1,17 +1,21 @@
-type RuleFn<T> = (deps: Record<string, any>) => T;
-type RuleMap = Record<string, RuleFn<any>>;
-type ValueMap<R extends RuleMap> = {
-  [K in keyof R]: ReturnType<R[K]>;
+// ===== Type Utilities =====
+type RuleFn<Deps, Result> = (deps: Deps) => Result;
+
+type RulesAccumulator = Record<string, RuleFn<any, any>>;
+
+type ExtractValues<R extends RulesAccumulator> = {
+  [K in keyof R]: R[K] extends RuleFn<any, infer Out> ? Out : never;
 };
 
 type Listener<T> = (value: T) => void;
 
-export function createReactiveRulesEngine<R extends RuleMap>(rules: R) {
-  const values: Partial<ValueMap<R>> = {};
-  const manualValues: Partial<ValueMap<R>> = {};
+// ===== Engine Core =====
+function createReactiveRulesEngine<R extends RulesAccumulator>(rules: R) {
+  const values: Partial<ExtractValues<R>> = {};
   const dependents: Record<keyof R, Set<keyof R>> = {} as any;
   const watchers: Partial<Record<keyof R, () => void>> = {};
   const listeners: Partial<Record<keyof R, Listener<any>[]>> = {};
+  const manualValues: Partial<ExtractValues<R>> = {};
 
   function notify<K extends keyof R>(key: K) {
     (listeners[key] || []).forEach((fn) => fn(values[key]!));
@@ -22,7 +26,7 @@ export function createReactiveRulesEngine<R extends RuleMap>(rules: R) {
 
   function defineReactive<K extends keyof R>(
     key: K,
-    fn: RuleFn<ReturnType<R[K]>>
+    fn: RuleFn<any, ExtractValues<R>[K]>
   ) {
     const depsUsed = new Set<keyof R>();
 
@@ -53,41 +57,69 @@ export function createReactiveRulesEngine<R extends RuleMap>(rules: R) {
     computeWithTracking();
   }
 
-  (Object.entries(rules) as [keyof R, RuleFn<any>][]).forEach(([key, fn]) => {
-    defineReactive(key, fn);
-  });
+  (Object.entries(rules) as [keyof R, RuleFn<any, any>][]).forEach(
+    ([key, fn]) => {
+      defineReactive(key, fn);
+    }
+  );
 
   return {
-    get<K extends keyof R>(key: K): ValueMap<R>[K] {
+    get<K extends keyof R>(key: K): ExtractValues<R>[K] {
       return values[key]!;
     },
-    set<K extends keyof R>(key: K, val: ValueMap<R>[K]) {
+    set<K extends keyof R>(key: K, val: ExtractValues<R>[K]) {
       manualValues[key] = val;
       values[key] = val;
       notify(key);
     },
-    onChange<K extends keyof R>(key: K, callback: Listener<ValueMap<R>[K]>) {
+    onChange<K extends keyof R>(
+      key: K,
+      callback: Listener<ExtractValues<R>[K]>
+    ) {
       if (!listeners[key]) listeners[key] = [];
       listeners[key]!.push(callback);
     },
-    snapshot(): ValueMap<R> {
-      return { ...values } as ValueMap<R>;
+    snapshot(): ExtractValues<R> {
+      return { ...values } as ExtractValues<R>;
     },
   };
 }
 
-const engine = createReactiveRulesEngine({
-  a: () => 2,
-  b: () => 3,
-  sum: ({ a, b }) => a + b,
-  product: ({ a, b }) => a * b,
-  doubleSum: ({ sum }) => sum * 2,
-});
+// ===== Fluent Builder =====
+class RuleEngineBuilder<R extends RulesAccumulator> {
+  private rules: R;
 
-// Use strongly typed methods
-engine.onChange("doubleSum", (val) =>
-  console.log("doubleSum changed to:", val)
-);
-console.log(engine.snapshot()); // { a: 2, b: 3, sum: 5, product: 6, doubleSum: 10 }
+  constructor(rules: R) {
+    this.rules = rules;
+  }
 
-engine.set("a", 10); // doubleSum changed to: 26
+  addRule<K extends string, Deps extends keyof ExtractValues<R>, Out>(
+    key: K,
+    fn: RuleFn<Pick<ExtractValues<R>, Deps>, Out>
+  ): RuleEngineBuilder<
+    R & { [P in K]: RuleFn<Pick<ExtractValues<R>, Deps>, Out> }
+  > {
+    return new RuleEngineBuilder({
+      ...this.rules,
+      [key]: fn,
+    }) as any;
+  }
+
+  build() {
+    return createReactiveRulesEngine(this.rules);
+  }
+}
+
+const engine = new RuleEngineBuilder({})
+  .addRule("a", () => 2)
+  .addRule("b", () => 3)
+  .addRule("sum", ({ a, b }) => a + b) // ✅ OK
+  .addRule("doubleSum", ({ sum }) => sum * 2) // ✅ OK
+  .build();
+
+// Reactive change
+engine.onChange("doubleSum", (v) => console.log("doubleSum changed to", v));
+
+console.log(engine.snapshot()); // { a: 2, b: 3, sum: 5, doubleSum: 10 }
+
+engine.set("a", 10); // doubleSum changed to 26
