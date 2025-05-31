@@ -10,7 +10,7 @@ type ExtractValues<R extends RulesAccumulator> = {
 type Listener<T> = (value: T) => void;
 
 // ===== Engine Core =====
-export function createReactiveRulesEngine<R extends RulesAccumulator>(rules: R) {
+function createReactiveRulesEngine<R extends RulesAccumulator>(rules: R) {
   const values: Partial<ExtractValues<R>> = {};
   const dependents: Record<keyof R, Set<keyof R>> = {} as any;
   const watchers: Partial<Record<keyof R, () => void>> = {};
@@ -86,7 +86,7 @@ export function createReactiveRulesEngine<R extends RulesAccumulator>(rules: R) 
 }
 
 // ===== Fluent Builder =====
-class RuleEngineBuilder<R extends RulesAccumulator> {
+export class RuleEngineBuilder<R extends RulesAccumulator> {
   private rules: R;
 
   constructor(rules: R) {
